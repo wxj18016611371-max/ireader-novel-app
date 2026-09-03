@@ -406,18 +406,30 @@ function handleTouchEnd(e) {
 
 // 用户主动点击【听书】按钮
 function startListeningExplicitly() {
-  // 关键步骤：在用户触摸事件上下文同步解锁手机系统音频权限
-  audioPlayerStore.unlockMobileAudio();
-
-  const book = props.book;
-  let startSentenceIndex = 0;
-  if (currentPageContent.value.length > 0 && currentPageContent.value[0].sentences.length > 0) {
-    startSentenceIndex = currentPageContent.value[0].sentences[0].globalIndex;
+  try {
+    if (typeof audioPlayerStore.unlockMobileAudio === 'function') {
+      audioPlayerStore.unlockMobileAudio();
+    }
+  } catch (e) {
+    console.warn('Unlock error', e);
   }
 
-  audioPlayerStore.loadChapterForListening(book, currentChapterIndex.value, startSentenceIndex);
-  audioPlayerStore.playCurrentSentence();
-  audioPlayerStore.openPlayerModal();
+  try {
+    const book = props.book;
+    if (!book) return;
+
+    let startSentenceIndex = 0;
+    if (currentPageContent.value.length > 0 && currentPageContent.value[0].sentences.length > 0) {
+      startSentenceIndex = currentPageContent.value[0].sentences[0].globalIndex;
+    }
+
+    audioPlayerStore.loadChapterForListening(book, currentChapterIndex.value, startSentenceIndex);
+    audioPlayerStore.playCurrentSentence();
+    audioPlayerStore.openPlayerModal();
+  } catch (err) {
+    console.error('startListeningExplicitly error', err);
+    audioPlayerStore.openPlayerModal();
+  }
 }
 
 // 听书跨页自动仿真翻页

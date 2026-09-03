@@ -192,6 +192,19 @@ export const useAudioPlayerStore = defineStore('audioPlayer', {
       } catch (e) {}
     },
 
+    unlockMobileAudio() {
+      try {
+        if (!this.audio) {
+          this.init();
+        }
+        if (typeof window !== 'undefined' && window.speechSynthesis) {
+          window.speechSynthesis.resume();
+        }
+      } catch (e) {
+        console.warn('Unlock mobile audio handled gracefully', e);
+      }
+    },
+
     splitChapterToSentences(content) {
       if (!content) return [];
       const rawSentences = content
