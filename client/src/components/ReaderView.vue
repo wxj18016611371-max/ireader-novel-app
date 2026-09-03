@@ -5,19 +5,19 @@
     @touchstart="handleTouchStart"
     @touchend="handleTouchEnd"
   >
-    <!-- 书脊仿真阴影 (实体书左侧阴影) -->
+    <!-- 仿真实体书书脊阴影 (左侧柔和光影) -->
     <div class="absolute left-0 top-0 bottom-0 w-8 book-spine-shadow z-20 pointer-events-none"></div>
 
-    <!-- 顶部极简状态信息 (仿掌阅) -->
-    <div class="h-8 px-6 flex items-center justify-between text-[11px] opacity-60 shrink-0 pointer-events-none z-10">
-      <span class="truncate max-w-[180px] font-medium">{{ book.title }}</span>
-      <span class="truncate max-w-[180px] text-right">{{ currentChapter?.title }}</span>
+    <!-- 顶部极简状态信息 (书名 & 章节名) -->
+    <div class="h-8 px-5 flex items-center justify-between text-[11px] opacity-60 shrink-0 pointer-events-none z-10 border-b border-current/5">
+      <span class="truncate max-w-[160px] font-medium">{{ book.title }}</span>
+      <span class="truncate max-w-[160px] text-right font-mono">{{ currentChapter?.title }}</span>
     </div>
 
-    <!-- ================= 掌阅 3D 仿真翻页视口 ================= -->
+    <!-- ================= 掌阅 3D 满屏仿真翻页视口 ================= -->
     <div 
       ref="readerViewport"
-      class="flex-1 relative overflow-hidden flex flex-col justify-between px-6 py-2 cursor-pointer"
+      class="flex-1 relative overflow-hidden flex flex-col justify-between px-5 py-3 cursor-pointer"
       :style="{
         fontSize: `${readerStore.fontSize}px`,
         lineHeight: readerStore.lineHeight,
@@ -27,10 +27,10 @@
       }"
       @click="handleViewportClick"
     >
-      <!-- 底层页 (翻页时显露的目标页) -->
+      <!-- 底层页 (翻页时透出的目标页，保持视觉连贯) -->
       <div 
         v-if="isTurning"
-        class="absolute inset-0 px-6 py-2 flex flex-col justify-between pointer-events-none z-0"
+        class="absolute inset-0 px-5 py-3 flex flex-col justify-between pointer-events-none z-0"
         :class="[readerStore.themeClass, readerStore.theme === 'parchment' ? 'bg-parchment-pattern' : '']"
         :style="{
           fontSize: `${readerStore.fontSize}px`,
@@ -40,15 +40,16 @@
           paddingRight: `${readerStore.sideMargin}px`
         }"
       >
-        <div>
-          <h2 v-if="targetPageIndex === 0" class="text-lg font-bold mb-4 opacity-90 border-b pb-2 border-current/15">
+        <div class="overflow-hidden flex-1 flex flex-col">
+          <h2 v-if="targetPageIndex === 0" class="text-base font-bold mb-3 opacity-90 border-b pb-1.5 border-current/15">
             {{ currentChapter?.title }}
           </h2>
-          <div class="space-y-3.5">
+          <div class="space-y-2 text-justify flex-1">
             <p 
               v-for="(para, pIdx) in targetPageContent" 
               :key="'target-' + pIdx" 
-              class="indent-8 leading-relaxed tracking-normal"
+              :class="para.isContinuation ? 'indent-0' : 'indent-8'"
+              class="leading-relaxed tracking-normal"
             >
               <span v-for="sent in para.sentences" :key="'target-s-' + sent.globalIndex">
                 {{ sent.text }}
@@ -57,13 +58,13 @@
           </div>
         </div>
         <!-- 底层页码 -->
-        <div class="h-6 flex items-center justify-between text-[10px] opacity-50 pb-1">
+        <div class="h-6 flex items-center justify-between text-[10px] opacity-50 shrink-0 pt-1 border-t border-current/5">
           <span>{{ currentChapter?.title }}</span>
           <span>第 {{ targetPageIndex + 1 }} / {{ totalPages }} 页</span>
         </div>
       </div>
 
-      <!-- 当前页 (主阅读页或正在掀起翻动的纸页) -->
+      <!-- 当前页 (主屏满屏纸页) -->
       <div 
         class="relative w-full h-full flex flex-col justify-between z-10 page-sheet"
         :class="[
@@ -71,22 +72,23 @@
           isTurning && turnDirection === 'prev' ? 'anim-curl-prev' : ''
         ]"
       >
-        <!-- 正文内容区 -->
-        <div class="overflow-hidden flex-1">
-          <!-- 仅在第一页顶部显示章节大标题 -->
+        <!-- 正文内容区 (紧密满屏填满，绝无大片空白) -->
+        <div class="overflow-hidden flex-1 flex flex-col">
+          <!-- 仅在第一页显示章节标题 -->
           <h1 
             v-if="currentPageIndex === 0" 
-            class="text-lg font-bold mb-4 pt-1 tracking-wide opacity-90 border-b pb-2 border-current/15"
+            class="text-base font-bold mb-3 pt-0.5 tracking-wide opacity-90 border-b pb-1.5 border-current/15 shrink-0"
           >
             {{ currentChapter?.title }}
           </h1>
 
-          <!-- 正文段落与句子 -->
-          <div class="space-y-3.5">
+          <!-- 满页段落与句子 -->
+          <div class="space-y-2.5 text-justify flex-1">
             <p 
               v-for="(para, pIdx) in currentPageContent" 
               :key="'curr-' + pIdx" 
-              class="indent-8 leading-relaxed tracking-normal"
+              :class="para.isContinuation ? 'indent-0' : 'indent-8'"
+              class="leading-relaxed tracking-normal"
             >
               <span 
                 v-for="sent in para.sentences" 
@@ -106,7 +108,7 @@
         </div>
 
         <!-- 页面底部仿真页码与章节进度 (掌阅经典底注) -->
-        <div class="h-6 flex items-center justify-between text-[10px] opacity-50 shrink-0 pt-2 border-t border-current/5">
+        <div class="h-6 flex items-center justify-between text-[10px] opacity-50 shrink-0 pt-1 border-t border-current/5">
           <span>本章进度 {{ chapterProgressPercent }}%</span>
           <span>第 {{ currentPageIndex + 1 }} / {{ totalPages }} 页</span>
         </div>
@@ -116,14 +118,13 @@
       </div>
     </div>
 
-    <!-- 底部极简阅读进度条 (时间 & 电量/总进度) -->
-    <div class="h-7 px-6 flex items-center justify-between text-[10px] opacity-50 shrink-0 pointer-events-none border-t border-current/5 z-10">
+    <!-- 底部极简阅读进度条 (时间 & 全书总进度) -->
+    <div class="h-7 px-5 flex items-center justify-between text-[10px] opacity-50 shrink-0 pointer-events-none border-t border-current/5 z-10">
       <span>{{ timeString }}</span>
       <span>全书已读 {{ totalBookPercent }}%</span>
     </div>
 
-    <!-- ================= 用户专属【听书按钮】 (按用户要求显式触发) ================= -->
-    <!-- 当尚未开启听书时，在页面右下方常驻一个优雅的掌阅/番茄风【听书】悬浮胶囊 -->
+    <!-- ================= 用户专属【听书按钮】 ================= -->
     <div 
       v-if="!audioPlayerStore.isPlaying && !readerStore.showMenu"
       class="fixed bottom-12 right-5 z-30 animate-in fade-in zoom-in duration-200"
@@ -193,20 +194,17 @@ const currentChapter = computed(() => {
   return props.book.chapters[currentChapterIndex.value] || props.book.chapters[0];
 });
 
-// 计算当前是否正在听这本小说以及这一章
 const isAudioActiveOnThisChapter = computed(() => {
   return audioPlayerStore.isPlaying && 
          audioPlayerStore.bookId === props.book.id && 
          audioPlayerStore.chapterIndex === currentChapterIndex.value;
 });
 
-// 全书进度百分比
 const totalBookPercent = computed(() => {
   if (!props.book.chapters.length) return 0;
   return Math.round(((currentChapterIndex.value + 1) / props.book.chapters.length) * 100);
 });
 
-// 本章进度百分比
 const chapterProgressPercent = computed(() => {
   if (totalPages.value <= 1) return 100;
   return Math.round(((currentPageIndex.value + 1) / totalPages.value) * 100);
@@ -239,27 +237,68 @@ const allChapterParagraphs = computed(() => {
   });
 });
 
-// 动态分页算法：根据字体大小和段落长度自适应拆分为离散书页
+/**
+ * ================= 满屏自适应排版分页算法 =================
+ * 彻底解决“只显示半页或三分之一”的排版缺陷：
+ * 1. 动态获取视口实际高度与宽度，计算精准的行数与每行中文字数。
+ * 2. 连续跨段排版，当前页填满前绝不提前切页！
+ * 3. 跨页段落平滑接续，使每一页从第一行严谨排布到最后一行！
+ */
 const pagedData = computed(() => {
   const paras = allChapterParagraphs.value;
   if (!paras.length) return [[]];
 
-  // 根据字号预估每页容纳字数 (例如 18px 约 360 字，24px 约 240 字)
-  const charsPerPage = Math.max(180, Math.floor(6500 / (readerStore.fontSize * readerStore.lineHeight)));
-  
+  // 移动端视口动态参数
+  const vH = typeof window !== 'undefined' ? window.innerHeight : 800;
+  const vW = typeof window !== 'undefined' ? Math.min(window.innerWidth, 540) : 390;
+
+  // 可用排版高度 (扣减顶部状态栏、底部页码栏以及上下边距)
+  const availableH = Math.max(420, vH - 120);
+  const availableW = Math.max(260, vW - readerStore.sideMargin * 2);
+
+  const lineH = readerStore.fontSize * readerStore.lineHeight;
+  const charsPerLine = Math.max(14, Math.floor(availableW / readerStore.fontSize));
+  const linesPerPage = Math.max(16, Math.floor(availableH / lineH));
+
+  // 充满整个屏幕需要的核心中文字数 (约 380~480 字)
+  const idealCharsPerPage = Math.floor(linesPerPage * charsPerLine * 0.94);
+
   const pages = [];
   let currentPage = [];
-  let currentLength = 0;
+  let currentChars = 0;
 
-  for (let p of paras) {
-    const pLength = p.sentences.reduce((acc, s) => acc + s.text.length, 0);
-    if (currentLength + pLength > charsPerPage && currentPage.length > 0) {
-      pages.push(currentPage);
-      currentPage = [p];
-      currentLength = pLength;
-    } else {
-      currentPage.push(p);
-      currentLength += pLength;
+  for (let pIdx = 0; pIdx < paras.length; pIdx++) {
+    const para = paras[pIdx];
+    let isParaContinuation = false;
+    let paraPart = { sentences: [], isContinuation: false };
+
+    for (let sIdx = 0; sIdx < para.sentences.length; sIdx++) {
+      const sent = para.sentences[sIdx];
+      const sentLength = sent.text.length;
+
+      // 如果当前页还能容纳这句话，或者当前页还没任何内容
+      if (currentChars + sentLength <= idealCharsPerPage || currentPage.length === 0) {
+        paraPart.sentences.push(sent);
+        currentChars += sentLength;
+      } else {
+        // 当前页已经彻底写满，推入整页！
+        if (paraPart.sentences.length > 0) {
+          currentPage.push(paraPart);
+        }
+        pages.push(currentPage);
+
+        // 另起满屏新页
+        currentPage = [];
+        currentChars = sentLength;
+        isParaContinuation = true;
+        paraPart = { sentences: [sent], isContinuation: true };
+      }
+    }
+
+    if (paraPart.sentences.length > 0) {
+      currentPage.push(paraPart);
+      // 段落末尾适当增加少许虚拟字数代表段间距
+      currentChars += Math.floor(charsPerLine * 0.4);
     }
   }
 
@@ -295,7 +334,7 @@ function turnNextPage() {
       currentPageIndex.value = targetPageIndex.value;
       isTurning.value = false;
       saveProgress();
-    }, 420);
+    }, 400);
   } else {
     // 最后一页翻向下一章
     if (currentChapterIndex.value < props.book.chapters.length - 1) {
@@ -317,7 +356,7 @@ function turnPrevPage() {
       currentPageIndex.value = targetPageIndex.value;
       isTurning.value = false;
       saveProgress();
-    }, 420);
+    }, 400);
   } else {
     // 第一页翻向上一章
     if (currentChapterIndex.value > 0) {
@@ -342,7 +381,7 @@ function handleViewportClick(e) {
   }
 }
 
-// 移动端手势滑动仿真翻页
+// 移动端手势滑动
 function handleTouchStart(e) {
   if (e.touches.length === 1) {
     touchStartX = e.touches[0].clientX;
@@ -355,22 +394,22 @@ function handleTouchEnd(e) {
     const deltaX = e.changedTouches[0].clientX - touchStartX;
     const deltaY = e.changedTouches[0].clientY - touchStartY;
 
-    // 水平滑动手势判定 (防止上下误触)
-    if (Math.abs(deltaX) > 45 && Math.abs(deltaX) > Math.abs(deltaY) * 1.5) {
+    if (Math.abs(deltaX) > 40 && Math.abs(deltaX) > Math.abs(deltaY) * 1.4) {
       if (deltaX < 0) {
-        turnNextPage(); // 向左滑 -> 翻下一页
+        turnNextPage();
       } else {
-        turnPrevPage(); // 向右滑 -> 翻上一页
+        turnPrevPage();
       }
     }
   }
 }
 
-// ================= 用户专属听书逻辑 =================
-// 仅当用户主动点击【听书】按钮时，才开启在线听书
+// 用户主动点击【听书】按钮
 function startListeningExplicitly() {
+  // 关键步骤：在用户触摸事件上下文同步解锁手机系统音频权限
+  audioPlayerStore.unlockMobileAudio();
+
   const book = props.book;
-  // 获取当前页的第一句话对应的 globalIndex，以便从当前视口第一行朗读
   let startSentenceIndex = 0;
   if (currentPageContent.value.length > 0 && currentPageContent.value[0].sentences.length > 0) {
     startSentenceIndex = currentPageContent.value[0].sentences[0].globalIndex;
@@ -381,16 +420,14 @@ function startListeningExplicitly() {
   audioPlayerStore.openPlayerModal();
 }
 
-// 听书自动跨页：当正在朗读的句子超出当前页时，自动触发仿真翻页同步！
+// 听书跨页自动仿真翻页
 watch(() => audioPlayerStore.sentenceIndex, (newSentIdx) => {
   if (!isAudioActiveOnThisChapter.value) return;
 
-  // 检查 newSentIdx 是否在当前页内
   const currentSentences = [];
   currentPageContent.value.forEach(p => p.sentences.forEach(s => currentSentences.push(s.globalIndex)));
 
   if (!currentSentences.includes(newSentIdx)) {
-    // 寻找包含该句子的页码
     for (let pIdx = 0; pIdx < pagedData.value.length; pIdx++) {
       const page = pagedData.value[pIdx];
       const pageSentences = [];
@@ -425,7 +462,6 @@ function jumpToChapter(index, page = 0) {
     }
     saveProgress();
 
-    // 如果听书正在进行中，同步切章听书
     if (audioPlayerStore.isPlaying && audioPlayerStore.bookId === props.book.id) {
       audioPlayerStore.loadChapterForListening(props.book, index, 0);
       audioPlayerStore.playCurrentSentence();

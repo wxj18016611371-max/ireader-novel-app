@@ -77,6 +77,9 @@ const DEFAULT_TOMATO_VOICES = [
   }
 ];
 
+// 云端免翻墙/免配公网在线 TTS 节点
+const CLOUD_TTS_GATEWAY = 'https://enquiries-opposition-cleanup-vitamin.trycloudflare.com';
+
 export const useAudioPlayerStore = defineStore('audioPlayer', {
   state: () => ({
     isPlaying: false,
@@ -152,28 +155,36 @@ export const useAudioPlayerStore = defineStore('audioPlayer', {
         });
 
         this.audio.addEventListener('error', (e) => {
-          console.warn('Audio playback error, will retry or fallback', e);
+          console.warn('Audio tag error, switching to next or fallback', e);
           this.isLoading = false;
         });
       }
 
-      // 尝试从服务端同步最新主播列表（若离线/纯前端则保留预置默认主播）
-      try {
-        const res = await fetch('/api/tts/voices');
-        if (res.ok) {
-          const data = await res.json();
-          if (data.code === 0 && data.data && data.data.length > 0) {
-            this.voices = data.data;
-          }
-        }
-      } catch (err) {}
-
+      // 读取本地保存的偏好
       try {
         const savedVoice = localStorage.getItem('ireader_tts_voice');
         if (savedVoice) this.currentVoiceId = savedVoice;
         const savedRate = localStorage.getItem('ireader_tts_rate');
         if (savedRate) this.playbackRate = parseFloat(savedRate);
       } catch (e) {}
+    },
+
+    /**
+     * 关键解决手机端 Safari / 微信 / Android 自动播放策略
+     * 在用户点按【听书】瞬间同步执行，获取手机系统音频播放权限
+     */
+    unlockMobileAudio() {
+      if (!this.audio) {
+        this.audio = new Audio();
+      }
+      // 播放一段极短微秒级静音数据，解锁 iOS/Android Audio 权限
+      this.audio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+      this.audio.play().then(() => this.audio.pause()).catch(() => {});
+
+      // 同时激活 SpeechSynthesis 上下文（双保险）
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        window.speechSynthesis.resume();
+      }
     },
 
     splitChapterToSentences(content) {
@@ -209,9 +220,7 @@ export const useAudioPlayerStore = defineStore('audioPlayer', {
     },
 
     /**
-     * 智能在线朗读合成：双通道保障
-     * 通道 1：本地/公网代理服务器 API（高并发、零跨域限制）
-     * 通道 2：纯前端 UniversalCommunicate 浏览器直连微软云（支持 GitHub Pages 纯静态 0 成本托管）
+     * 纯在线高保真神经网络朗读 (手机端兼容处理)
      */
     async playCurrentSentence() {
       if (!this.sentences || this.sentences.length === 0) return;
@@ -232,75 +241,49 @@ export const useAudioPlayerStore = defineStore('audioPlayer', {
         this.audio.pause();
       }
 
-      // 首先尝试服务端 API
-      let success = false;
+      // 计算在线音频地址：
+      // 如果当前在公网/本地隧道，直接用相对路径；如果部署在 GitHub Pages，则直连 Cloudflare 全球公网网关
+      let baseUrl = '';
+      if (typeof window !== 'undefined' && window.location.hostname.includes('github.io')) {
+        baseUrl = CLOUD_TTS_GATEWAY;
+      }
+      const encodedText = encodeURIComponent(text);
+      const audioUrl = `${baseUrl}/api/tts/audio?text=${encodedText}&voice=${this.currentVoiceId}&rate=${this.playbackRate}`;
+
+      let playSuccess = false;
+
+      // 方案 1：请求纯在线云端神经网络 MP3 音频流
       try {
-        const encodedText = encodeURIComponent(text);
-        const url = `/api/tts/audio?text=${encodedText}&voice=${this.currentVoiceId}&rate=${this.playbackRate}`;
-        
-        // 快速健康检测
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 2500);
-        const testRes = await fetch(url, { method: 'HEAD', signal: controller.signal });
-        clearTimeout(timeoutId);
-
-        if (testRes.ok) {
-          this.audio.src = url;
-          this.audio.playbackRate = this.playbackRate;
-          await this.audio.play();
-          success = true;
-        }
+        this.audio.src = audioUrl;
+        this.audio.playbackRate = this.playbackRate;
+        await this.audio.play();
+        playSuccess = true;
       } catch (err) {
-        // 服务端离线或静态 GitHub Pages 环境
+        console.warn('Online neural audio play interrupted, trying fallback', err);
       }
 
-      // 如果服务端未响应，进入纯浏览器客户端直连微软云
-      if (!success) {
+      // 方案 2：如果网络超时或隧道暂时未连上，使用手机系统高拟真 Web Speech API 兜底朗读
+      if (!playSuccess && typeof window !== 'undefined' && window.speechSynthesis) {
         try {
-          const { UniversalCommunicate } = await import('edge-tts-universal');
-          const ratePercent = Math.round((this.playbackRate - 1) * 100);
-          const rateStr = ratePercent >= 0 ? `+${ratePercent}%` : `${ratePercent}%`;
-
-          const comm = new UniversalCommunicate(text, {
-            voice: this.currentVoiceId,
-            rate: rateStr
-          });
-
-          const chunks = [];
-          for await (const chunk of comm.stream()) {
-            if (chunk.type === 'audio') {
-              chunks.push(chunk.data);
-            }
-          }
-
-          if (chunks.length > 0) {
-            const blob = new Blob(chunks, { type: 'audio/mp3' });
-            const blobUrl = URL.createObjectURL(blob);
-            this.audio.src = blobUrl;
-            this.audio.playbackRate = this.playbackRate;
-            await this.audio.play();
-            success = true;
-          }
-        } catch (clientErr) {
-          console.warn('Browser direct TTS error, fallback to Web Speech', clientErr);
+          window.speechSynthesis.cancel();
+          const utter = new SpeechSynthesisUtterance(text);
+          utter.rate = this.playbackRate;
+          utter.lang = 'zh-CN';
+          utter.onend = () => {
+            this.handleSentenceEnded();
+          };
+          utter.onerror = (e) => {
+            console.warn('Speech error', e);
+            this.isLoading = false;
+          };
+          window.speechSynthesis.speak(utter);
+          playSuccess = true;
+        } catch (e) {
+          console.warn('Web speech failed', e);
         }
       }
 
-      // 极端降级兜底方案：浏览器内置 Web Speech API
-      if (!success && typeof window !== 'undefined' && window.speechSynthesis) {
-        window.speechSynthesis.cancel();
-        const utter = new SpeechSynthesisUtterance(text);
-        utter.rate = this.playbackRate;
-        utter.lang = 'zh-CN';
-        utter.onend = () => this.handleSentenceEnded();
-        utter.onerror = () => { this.isLoading = false; };
-        window.speechSynthesis.speak(utter);
-        this.isPlaying = true;
-        this.isLoading = false;
-        success = true;
-      }
-
-      if (success) {
+      if (playSuccess) {
         this.isPlaying = true;
         this.isLoading = false;
         const bookshelfStore = useBookshelfStore();
