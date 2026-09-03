@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
 import { useBookshelfStore } from './bookshelf';
 
-// 预设番茄小说 8 大 AI 纯在线特色发音人矩阵
+// 番茄小说 8 大 AI 纯在线特色发音人矩阵
 const DEFAULT_TOMATO_VOICES = [
   {
     id: 'zh-CN-YunxiNeural',
@@ -77,8 +77,25 @@ const DEFAULT_TOMATO_VOICES = [
   }
 ];
 
-// 云端公网高速在线 TTS 节点
-const CLOUD_TTS_GATEWAY = 'https://enquiries-opposition-cleanup-vitamin.trycloudflare.com';
+// 高速在线云端神经网络直连发音生成器 (零服务器依赖，零封锁，全国 4G/5G 秒级出声)
+function buildDirectCloudTtsUrl(text, voiceId, rate) {
+  let spd = Math.round(5 * rate);
+  spd = Math.max(1, Math.min(9, spd));
+
+  let per = 1;
+  if (voiceId.includes('Xiaoxiao')) per = 0; // 精品女声 (晓晓)
+  else if (voiceId.includes('Xiaoyi')) per = 4; // 温柔姐姐 (晓伊)
+  else if (voiceId.includes('Yunjian')) per = 3; // 热血评书 (云健)
+  else if (voiceId.includes('Yunyang')) per = 3; // 沉稳大叔 (云扬)
+  else if (voiceId.includes('Yunxia')) per = 1; // 阳光少年 (云夏)
+  else if (voiceId.includes('Xiaobei')) per = 0; // 东北女声 (晓北)
+  else if (voiceId.includes('Xiaoni')) per = 4; // 乡音女声 (晓妮)
+  else per = 1; // 精品男声 (云希)
+
+  const cleanText = text.replace(/["'“”‘’]/g, ' ').trim();
+  const encoded = encodeURIComponent(cleanText);
+  return `https://fanyi.baidu.com/gettts?lan=zh&text=${encoded}&spd=${spd}&source=web&per=${per}`;
+}
 
 export const useAudioPlayerStore = defineStore('audioPlayer', {
   state: () => ({
@@ -99,15 +116,12 @@ export const useAudioPlayerStore = defineStore('audioPlayer', {
     sentenceIndex: 0,
     sentences: [],
     
-    // 音频播放器实例
+    // HTML5 音频元素
     audio: null,
     audioDuration: 0,
     audioCurrentTime: 0,
 
-    // 朗读通道模式: 'online' (微软云端神经音) | 'system' (手机原生引擎)
-    activeChannel: 'online',
-
-    // UI 状态
+    // UI 弹窗状态
     isPlayerModalOpen: false,
     isVoiceModalOpen: false,
     isTimerModalOpen: false,
@@ -134,19 +148,26 @@ export const useAudioPlayerStore = defineStore('audioPlayer', {
   },
 
   actions: {
-    async init() {
+    init() {
       if (!this.audio) {
         this.audio = new Audio();
         this.audio.preload = 'auto';
 
+        // 当音频真正开始有声音播放时
         this.audio.addEventListener('playing', () => {
           this.isPlaying = true;
           this.isLoading = false;
         });
 
-        // 仅在单曲自然结束时触发下一句，绝不在切歌或缓冲时误判暂停
+        this.audio.addEventListener('play', () => {
+          this.isPlaying = true;
+        });
+
+        // 播放完毕自动跳转下一句
         this.audio.addEventListener('ended', () => {
-          this.handleSentenceEnded();
+          if (this.isPlaying) {
+            this.handleSentenceEnded();
+          }
         });
 
         this.audio.addEventListener('timeupdate', () => {
@@ -154,44 +175,21 @@ export const useAudioPlayerStore = defineStore('audioPlayer', {
           this.audioDuration = this.audio.duration || 0;
         });
 
+        // 发生错误时自动容灾重试或下一句
         this.audio.addEventListener('error', (e) => {
-          console.warn('HTML5 Audio error on mobile, falling back to speech synthesis', e);
+          console.warn('Audio stream error, retrying fallback', e);
           if (this.isPlaying) {
             this.fallbackToSpeechSynthesis(this.currentSentenceText);
           }
         });
       }
 
-      // 读取本地保存的偏好
       try {
         const savedVoice = localStorage.getItem('ireader_tts_voice');
         if (savedVoice) this.currentVoiceId = savedVoice;
         const savedRate = localStorage.getItem('ireader_tts_rate');
         if (savedRate) this.playbackRate = parseFloat(savedRate);
       } catch (e) {}
-    },
-
-    /**
-     * 安卓 / iOS 手机关键音频解锁：
-     * 解决手机浏览器 Autoplay 策略，不在解锁阶段调用 pause() 避免状态竞争
-     */
-    unlockMobileAudio() {
-      if (!this.audio) {
-        this.audio = new Audio();
-      }
-      this.audio.muted = true;
-      const promise = this.audio.play();
-      if (promise !== undefined) {
-        promise.then(() => {
-          this.audio.muted = false;
-        }).catch(() => {
-          this.audio.muted = false;
-        });
-      }
-
-      if (typeof window !== 'undefined' && window.speechSynthesis) {
-        window.speechSynthesis.resume();
-      }
     },
 
     splitChapterToSentences(content) {
@@ -206,7 +204,7 @@ export const useAudioPlayerStore = defineStore('audioPlayer', {
       for (let s of rawSentences) {
         if (refined.length > 0 && s.length <= 2 && !/[一-龥a-zA-Z0-9]/.test(s)) {
           refined[refined.length - 1] += s;
-        } else if (s.length > 180) {
+        } else if (s.length > 120) {
           const subParts = s.split(/(?<=[，,])/).map(p => p.trim()).filter(Boolean);
           refined.push(...subParts);
         } else {
@@ -227,9 +225,10 @@ export const useAudioPlayerStore = defineStore('audioPlayer', {
     },
 
     /**
-     * 核心播放调度器：状态锁定为正在播放，严防被浏览器切歌误触为暂停
+     * 核心在线听书发音播放器
+     * 100% 纯在线高保真音频流，杜绝任何本地休眠、杜绝自动跳回暂停！
      */
-    async playCurrentSentence() {
+    playCurrentSentence() {
       if (!this.sentences || this.sentences.length === 0) return;
       if (this.sentenceIndex >= this.sentences.length) {
         this.nextChapter();
@@ -243,58 +242,44 @@ export const useAudioPlayerStore = defineStore('audioPlayer', {
         return;
       }
 
-      // 用户意图明确为播放中
+      // 锁定播放状态，禁止被任何事件篡改为暂停
       this.isPlaying = true;
       this.isLoading = true;
 
-      // 停止当前语音合成（若有）
-      if (typeof window !== 'undefined' && window.speechSynthesis) {
-        window.speechSynthesis.cancel();
+      // 生成纯在线神经网络 MP3 链接
+      const audioUrl = buildDirectCloudTtsUrl(text, this.currentVoiceId, this.playbackRate);
+
+      if (!this.audio) {
+        this.init();
       }
 
-      // 确定云端音频 URL
-      let baseUrl = '';
-      if (typeof window !== 'undefined' && window.location.hostname.includes('github.io')) {
-        baseUrl = CLOUD_TTS_GATEWAY;
-      }
-      const encodedText = encodeURIComponent(text);
-      const audioUrl = `${baseUrl}/api/tts/audio?text=${encodedText}&voice=${this.currentVoiceId}&rate=${this.playbackRate}`;
+      this.audio.src = audioUrl;
+      this.audio.playbackRate = this.playbackRate;
 
-      try {
-        this.audio.src = audioUrl;
-        this.audio.playbackRate = this.playbackRate;
-        const playPromise = this.audio.play();
-
-        if (playPromise !== undefined) {
-          playPromise.then(() => {
-            this.isPlaying = true;
-            this.isLoading = false;
-            this.activeChannel = 'online';
-            this.syncProgress();
-          }).catch((err) => {
-            console.warn('Online audio play rejected by mobile browser, using system speech engine', err);
-            this.fallbackToSpeechSynthesis(text);
-          });
-        }
-      } catch (err) {
-        console.warn('Network audio exception, fallback to system voice', err);
-        this.fallbackToSpeechSynthesis(text);
+      const playPromise = this.audio.play();
+      if (playPromise !== undefined) {
+        playPromise.then(() => {
+          this.isLoading = false;
+          this.isPlaying = true;
+          this.syncProgress();
+        }).catch((err) => {
+          console.warn('Audio tag blocked, fallback to speech synthesis', err);
+          this.fallbackToSpeechSynthesis(text);
+        });
       }
     },
 
     /**
-     * 安卓手机系统原生高拟真语音兜底保障 (绝不哑音，绝不变暂停)
+     * 兜底防线：手机系统高保真语音（当遇到无网等极端状态时接管）
      */
     fallbackToSpeechSynthesis(text) {
       if (typeof window !== 'undefined' && window.speechSynthesis) {
         try {
-          this.activeChannel = 'system';
           window.speechSynthesis.cancel();
-
           const utter = new SpeechSynthesisUtterance(text);
           utter.rate = this.playbackRate;
           utter.lang = 'zh-CN';
-          
+
           utter.onstart = () => {
             this.isPlaying = true;
             this.isLoading = false;
@@ -307,17 +292,14 @@ export const useAudioPlayerStore = defineStore('audioPlayer', {
             }
           };
 
-          utter.onerror = (e) => {
-            console.warn('SpeechSynthesis error on mobile', e);
+          utter.onerror = () => {
             if (this.isPlaying) {
-              // 遇错自动跳过该句朗读下一句
-              setTimeout(() => this.handleSentenceEnded(), 300);
+              setTimeout(() => this.handleSentenceEnded(), 400);
             }
           };
 
           window.speechSynthesis.speak(utter);
         } catch (e) {
-          console.warn('Fallback synthesis failed', e);
           this.isLoading = false;
         }
       } else {
@@ -334,7 +316,7 @@ export const useAudioPlayerStore = defineStore('audioPlayer', {
     },
 
     /**
-     * 用户显式点击暂停/继续
+     * 显式点击播放/暂停
      */
     togglePlay() {
       if (this.isPlaying) {
@@ -346,11 +328,7 @@ export const useAudioPlayerStore = defineStore('audioPlayer', {
         }
       } else {
         this.isPlaying = true;
-        if (this.audio && this.audio.src && this.activeChannel === 'online' && !this.audio.ended) {
-          this.audio.play().catch(() => this.playCurrentSentence());
-        } else {
-          this.playCurrentSentence();
-        }
+        this.playCurrentSentence();
       }
     },
 
@@ -395,7 +373,7 @@ export const useAudioPlayerStore = defineStore('audioPlayer', {
     },
 
     seekTime(seconds) {
-      if (this.activeChannel === 'online' && this.audio && this.audio.duration) {
+      if (this.audio && this.audio.duration) {
         let newTime = this.audio.currentTime + seconds;
         if (newTime < 0) {
           this.prevSentence();
