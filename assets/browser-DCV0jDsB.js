@@ -1,0 +1,1 @@
+var e=`speech.platform.bing.com/consumer/speech/synthesize/readaloud`,t=`6A5AA1D4EAFF4E9FB37E23D68491D6F4`;`${e}${t}`,`${e}${t}`;var n=`143.0.3650.75`,r=n.split(`.`)[0];`${n}`,`${r}${r}`,`${r}${r}`;
